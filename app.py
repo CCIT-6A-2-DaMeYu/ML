@@ -17,7 +17,7 @@ app = Flask(__name__)
 app.config['ALLOWED_EXTENSIONS'] = set(['jpg', 'png', 'jpeg'])
 CORS(app)
 
-class PlantData:
+class MaturityData:
     kelembaban: float
     suhu: float
     kematangan: str
@@ -35,8 +35,8 @@ def check_server_availability(destination_url, timeout=30):
     except requests.exceptions.Timeout:
         return False
 
-def loadmodelSVM():
-    model = joblib.load('asset/model/svm/svm_model_with_cv_224.sav')
+def loadmodelCNN():
+    model = joblib.load('asset/Model/apple_maturity_cnn.h5')
     return model
 
 def processImage(images, target_size=(128, 128)):
@@ -44,15 +44,12 @@ def processImage(images, target_size=(128, 128)):
     img_resized = cv2.resize(img, target_size)
     img_flat = img_resized.flatten()
     img_2d = img_flat.reshape(1, -1)
-
-def processImage2(images):
-
- img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) 
- images.append(img_hsv)
+    img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) 
+    images.append(img_hsv)
 
 def predict_class(images):
-    model = loadmodelSVM()
-    predictions = model.predict(image)
+    model = loadmodelCNN()
+    predictions = model.predict(images)
 
     return predictions
 
@@ -75,13 +72,11 @@ def make_predictions(input_encoded, model):
     predictions = model.predict(input_encoded)
     return predictions.tolist()
 
-class PlantData:
-    def __init__(self, kelembapan, intensitasCahaya, ph, jenisTanah):
+class MaturityData:
+    def __init__(self, kelembapan, suhu, kematangan):
         self.kelembapan = kelembapan
-        self.intensitasCahaya = intensitasCahaya
-        self.ph = ph
-        self.jenisTanah = jenisTanah
-
+        self.suhu = suhu
+        self.kematangan = kematangan
 @app.before_request
 def remove_trailing_slash():
     if request.path != '/' and request.path.endswith('/'):
@@ -104,12 +99,11 @@ def plant_recommendation():
         if not input_data:
             raise ValueError("No input data provided")
 
-        plant = PlantData(**input_data)
+        maturity = MaturityData(**input_data)
         data = {
-            "kelembapan": plant.kelembapan,
-            "intensitas cahaya": plant.intensitasCahaya,
-            "ph": plant.ph,
-            "jenis tanah": plant.jenisTanah
+            "kelembaban": maturity.kelembapan,
+            "suhu": maturity.suhu,
+            "kematangan": maturity.kematangan
         }
         model, column_transformer = loadModelDT()
         encoded_data = preprocess_input(data, column_transformer)
