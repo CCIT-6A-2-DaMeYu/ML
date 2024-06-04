@@ -1,4 +1,5 @@
 import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 import cv2
 import requests
 import joblib
@@ -7,8 +8,10 @@ from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
 from dataclasses import dataclass
 from typing import Any, Dict
+import tensorflow as tf
 import pandas as pd
 import joblib
+from tensorflow import keras
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.compose import ColumnTransformer
@@ -16,6 +19,8 @@ from sklearn.compose import ColumnTransformer
 app = Flask(__name__)
 app.config['ALLOWED_EXTENSIONS'] = set(['jpg', 'png', 'jpeg'])
 CORS(app)
+
+# bikin koneksi firebase disini
 
 class MaturityData:
     kelembaban: float
@@ -36,22 +41,27 @@ def check_server_availability(destination_url, timeout=30):
         return False
 
 def loadmodelCNN():
-    model = joblib.load('asset/Model/apple_maturity_cnn.h5')
+    model = keras.models.load_model('Model/apple_maturity_cnn_model2.h5')
     return model
 
-def processImage(images, target_size=(128, 128)):
-    img = cv2.imread(images)
+def processImage(image_path, target_size=(128, 128)):
+    img = cv2.imread(image_path)
     img_resized = cv2.resize(img, target_size)
-    img_flat = img_resized.flatten()
-    img_2d = img_flat.reshape(1, -1)
-    img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) 
-    images.append(img_hsv)
+    img_hsv = cv2.cvtColor(img_resized, cv2.COLOR_BGR2HSV)
+    print("Shape after processing: ", img_hsv.shape)
+    img_normalized = tf.cast(img_hsv, tf.float32) / 255.0
+    img_batched = tf.expand_dims(img_normalized, axis=0)
+    return img_batched
 
 def predict_class(images):
+    print("in predict")
     model = loadmodelCNN()
+    print("model loaded")
     predictions = model.predict(images)
+    predicted_class = tf.argmax(predictions, axis=1).numpy()
+    print("success")
 
-    return predictions
+    return predicted_class
 
 def loadModelDT():
     model = joblib.load('asset/model/decision_tree/decision_tree_model_v1.1.sav')
@@ -92,18 +102,14 @@ def homepage():
         print("Error:", e)
         return "Error: File not found", 500
 
-@app.route("/api/recommendation", methods=['POST'])
-def plant_recommendation():
+def plant_recommendation(predictiion):
     try:
-        input_data = request.get_json()
-        if not input_data:
-            raise ValueError("No input data provided")
-
-        maturity = MaturityData(**input_data)
+        # maturity = MaturityData(**input_data)
+        # ambil value input dari iot
         data = {
             "kelembaban": maturity.kelembapan,
             "suhu": maturity.suhu,
-            "kematangan": maturity.kematangan
+            "kematangan": prediction
         }
         model, column_transformer = loadModelDT()
         encoded_data = preprocess_input(data, column_transformer)
@@ -111,11 +117,11 @@ def plant_recommendation():
 
         return jsonify({
             "data":{
-                "plantRecommendation": prediction[0]
+                "maturityEstimation": prediction[0]
                 },
             "status":{
                     "code":200,
-                    "message":"successfully recommending plant"
+                    "message":"successfully estimationing maturity"
                 }}
             ), 200
     
@@ -133,19 +139,21 @@ def soil_prediction():
             image.save(temp_path)
 
             processed_image = processImage(temp_path)
-            print(processed_image)
+            print("processed image shape :", processed_image.shape)
             predicted_class = predict_class(processed_image)
             print("predicted : ", predicted_class[0])
+
+            prediction = str(predicted_class[0])
 
             os.remove(temp_path)
             os.rmdir(temp_dir)
             return jsonify({
                 "data": {
-                    "jenis_tanah": predicted_class[0]
+                    "kematangan": prediction
                 }, 
                 "status": {
                     "code": 200,
-                    "message": "successfully predicted soil type"
+                    "message": "successfully Predict Maturity of Apple"
                 },
             }), 200
         else:
