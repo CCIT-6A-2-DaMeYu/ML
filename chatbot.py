@@ -22,8 +22,11 @@ def scrape_apple_diseases(url):
     return text
 
 # URL dari website yang memiliki informasi tentang penyakit pada daun apel
-url = "https://www.kompas.com/homey/read/2022/09/04/095956376/ketahui-ini-4-penyakit-yang-menyerang-tanaman-apel"
-scraped_text = scrape_apple_diseases(url)
+scrap_result = []
+url = ["https://www.kompas.com/homey/read/2022/09/04/095956376/ketahui-ini-4-penyakit-yang-menyerang-tanaman-apel", "https://www.idntimes.com/science/discovery/timmy-si-penulis/penyakit-yang-menyerang-tanaman-apel-1"]
+for content in url :
+    scraped_text = scrape_apple_diseases(content)
+    scrap_result.append(scraped_text)
 
 # Fungsi untuk memproses teks menjadi daftar kalimat
 def preprocess_text(text):
