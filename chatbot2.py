@@ -19,26 +19,31 @@ nltk.download('stopwords')
 # Knowledge base
 knowledge_base = {
     "bercak daun": {
+        "pengertian": "Bercak daun adalah penyakit pada daun tanaman yang disebabkan oleh infeksi jamur atau bakteri, ditandai dengan munculnya bercak-bercak kecil berwarna cokelat atau hitam.",
         "gejala": "Munculnya bercak-bercak kecil berwarna cokelat atau hitam pada daun.",
         "penyebab": "Infeksi jamur atau bakteri.",
         "cara mengatasi": "Menggunakan fungisida yang sesuai, menjaga kebersihan lingkungan sekitar pohon, dan memangkas bagian yang terinfeksi."
     },
     "busuk buah": {
+        "pengertian": "Busuk buah adalah penyakit pada buah apel yang disebabkan oleh infeksi jamur seperti Botrytis atau Monilinia, menyebabkan buah menjadi membusuk dan berwarna cokelat atau hitam.",
         "gejala": "Buah apel membusuk dan berwarna cokelat atau hitam.",
         "penyebab": "Infeksi jamur seperti Botrytis atau Monilinia.",
         "cara mengatasi": "Membuang buah yang terinfeksi, menggunakan fungisida, dan menjaga kebersihan kebun."
     },
     "kanker batang": {
+        "pengertian": "Kanker batang adalah penyakit pada batang pohon yang disebabkan oleh infeksi jamur Nectria galligena, ditandai dengan luka pada batang yang mengeluarkan getah dan menyebabkan batang membengkak dan mati.",
         "gejala": "Luka pada batang pohon yang mengeluarkan getah, batang membengkak dan mati.",
         "penyebab": "Infeksi jamur Nectria galligena.",
         "cara mengatasi": "Memangkas bagian yang terinfeksi, menggunakan fungisida, dan menjaga kebersihan kebun."
     },
     "mati pucuk": {
+        "pengertian": "Mati pucuk adalah penyakit pada tanaman apel yang menyebabkan ujung-ujung cabang mengering dan mati, biasanya disebabkan oleh infeksi jamur atau bakteri.",
         "gejala": "Ujung-ujung cabang mengering dan mati.",
         "penyebab": "Infeksi jamur atau bakteri.",
         "cara mengatasi": "Memangkas bagian yang terinfeksi, menggunakan fungisida atau bakterisida, dan menjaga kebersihan kebun."
     }
 }
+
 
 # Fungsi untuk melakukan web scraping dan mendapatkan teks
 def scrape_apple_diseases(url):
@@ -85,25 +90,46 @@ def find_answer_tfidf(sentences, query):
 # Temukan nama penyakit berdasarkan gejala
 def find_disease_from_symptom(query):
     for disease, info in knowledge_base.items():
-        if query.lower() in info['gejala'].lower():
+        if any(symptom in query.lower() for symptom in info['gejala'].lower().split(", ")):
             return disease
     return None
+
 # Temukan jawaban yang relevan dari knowledge base
 def find_answer_from_knowledge_base(query):
-    if "penyakit apa " in query.lower():
+    if "apa saja" in query.lower():
         return ", ".join(knowledge_base.keys())
+    query_words = set(query.lower().split())
+    
     for key, value in knowledge_base.items():
-        if key in query.lower():
-            if "gejala" in query.lower():
-                return value["gejala"]
+        key_words = set(key.split())
+        if query_words & key_words:
+            if key in query.lower():
+                if "gejala" in query.lower():
+                 return value["gejala"]
+            elif "mengalami" in query.lower():
+                return value["pengertian"]
             elif "penyebab" in query.lower():
+                return value["penyebab"]
+            elif "menyebabkan" in query.lower():
                 return value["penyebab"]
             elif "cara mengatasi" in query.lower():
                 return value["cara mengatasi"]
+            elif "mengobati" in query.lower():
+                return value["cara mengatasi"]
+            elif "mengatasi" in query.lower():
+                return value["cara mengatasi"]
+            elif "apa itu" in query.lower():
+                return value["pengertian"]
+            elif "pengertian" in query.lower():
+                return value["pengertian"]
             else:
-                return f"Gejala: {value['gejala']}, Penyebab: {value['penyebab']}, Cara mengatasi: {value['cara mengatasi']}"
+                return f"Pengertian: {value['pengertian']}, Gejala: {value['gejala']}, Penyebab: {value['penyebab']}, Cara mengatasi: {value['cara mengatasi']}"
+            
+# Pencocokan kata kunci parsial
+    for key, value in knowledge_base.items():
+        if any(word in query.lower() for word in key.split()):
+            return f"Pengertian: {value['pengertian']}, Gejala: {value['gejala']}, Penyebab: {value['penyebab']}, Cara mengatasi: {value['cara mengatasi']}"
     return None
-
 
 # Inisialisasi Flask
 app = Flask(__name__)
@@ -161,8 +187,13 @@ def chatbot():
             "mau nanya sesuatu",
             "bisa bantu saya",
             "mau nanya dong",
+            "mau nanya",
             "jadi gini",
-            "saya ingin bertanya"
+            "saya ingin bertanya",
+            "ingin bertanya",
+            "ingin bertanya sesuatu",
+            "saya ingin bertanya",
+            "pengen nanya"
         ]
 
         if any(greet in user_input.lower() for greet in greetings):
@@ -174,16 +205,16 @@ def chatbot():
         # Cek knowledge base untuk jawaban yang relevan
         answer_from_kb = find_answer_from_knowledge_base(user_input)
         if answer_from_kb:
-            return jsonify({'answer': answer_from_kb})
+            return jsonify({'answer': "Ini jawabannya: " + answer_from_kb})
         
         # Jika tidak ditemukan di knowledge base, coba cari nama penyakit berdasarkan gejala
         disease_from_symptom = find_disease_from_symptom(user_input)
         if disease_from_symptom:
-            return jsonify({'answer': disease_from_symptom})
+            return jsonify({'answer': f'Berdasarkan gejala yang Anda sebutkan, kemungkinan penyakitnya adalah {disease_from_symptom}.'})
         
         # Jika tidak ditemukan di knowledge base atau berdasarkan gejala, gunakan TF-IDF dan cosine similarity
         answer_from_tfidf = find_answer_tfidf(sentences, user_input)
-        return jsonify({'answer': answer_from_tfidf})
+        return jsonify({'answer': "Pertanyaan Tersebut Diluar Tema dari ChatBot"})
 
 if __name__ == '__main__':
     app.run(debug=True, port=8081)
@@ -192,6 +223,7 @@ if __name__ == '__main__':
 
 
 
+ 
 
 
 
