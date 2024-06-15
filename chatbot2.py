@@ -106,8 +106,6 @@ def find_answer_from_knowledge_base(query):
             if key in query.lower():
                 if "gejala" in query.lower():
                  return value["gejala"]
-            elif "mengalami" in query.lower():
-                return value["pengertian"]
             elif "penyebab" in query.lower():
                 return value["penyebab"]
             elif "menyebabkan" in query.lower():
@@ -121,6 +119,8 @@ def find_answer_from_knowledge_base(query):
             elif "apa itu" in query.lower():
                 return value["pengertian"]
             elif "pengertian" in query.lower():
+                return value["pengertian"]
+            elif "mengalami" in query.lower():
                 return value["pengertian"]
             else:
                 return f"Pengertian: {value['pengertian']}, Gejala: {value['gejala']}, Penyebab: {value['penyebab']}, Cara mengatasi: {value['cara mengatasi']}"
@@ -157,7 +157,7 @@ sentences = preprocess_text(combined_text)
 def chatbot():
     if request.method == 'GET':
         session.clear()
-        return jsonify({'greeting': 'Halo, adakah yang bisa saya bantu seputar penyakit pada daun apel?'})
+        return jsonify({'greeting': 'Halo, adakah yang bisa saya bantu seputar penyakit pada apel?'})
     
     elif request.method == 'POST':
         user_input = request.json.get('query')
