@@ -204,7 +204,7 @@ def find_disease_from_symptom(query):
 
 # Find relevant answer from knowledge base
 def find_answer_from_knowledge_base(query):
-    if "what are" in query.lower():
+    if "disease" in query.lower():
         return ", ".join(knowledge_base.keys())
     query_words = set(query.lower().split())
     
