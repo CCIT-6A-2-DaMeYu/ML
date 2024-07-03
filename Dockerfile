@@ -1,5 +1,5 @@
 # Menggunakan image Python 3.11.0-slim
-FROM python:3.11.0-slim
+FROM python:3.11-slim
 
 # Install dependensi yang dibutuhkan oleh OpenCV
 RUN apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0
