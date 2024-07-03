@@ -1,5 +1,3 @@
-# Use the official lightweight Python image.
-# https://hub.docker.com/_/python
 FROM python:3.11-slim
 
 # Set environment variables
@@ -12,11 +10,22 @@ WORKDIR /app
 # Copy the requirements file into the container
 COPY requirements.txt .
 
+# Update the package list and install necessary system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    libgl1-mesa-glx \
+    libglib2.0-0 && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install the dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code into the container
 COPY . .
+
+EXPOSE 8081
 
 # Run the application
 CMD ["python", "app.py"]
