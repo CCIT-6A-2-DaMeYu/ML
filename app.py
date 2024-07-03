@@ -1,23 +1,20 @@
 import os
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-import cv2
-import requests
-import joblib
 import tempfile
-from flask import Flask, request, jsonify, redirect
+import cv2
+import base64
+import json
+import firebase_admin.db
+from flask import Flask, request, jsonify
 from flask_cors import CORS
-from dataclasses import dataclass
-from typing import Any, Dict
+import firebase_admin
+from firebase_admin import credentials, db
+from PIL import Image
+import io
+import numpy as np
 import tensorflow as tf
-import pandas as pd
-import joblib
 from tensorflow import keras
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.compose import ColumnTransformer
-import requests
-from bs4 import BeautifulSoup
-import pdfplumber
+import joblib
+import pandas as pd
 import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.corpus import stopwords
@@ -26,74 +23,121 @@ from flask import Flask, request, jsonify, session
 from flask_session import Session
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
-import random
+from dotenv import load_dotenv
 
+
+# Inisialisasi Flask app
 app = Flask(__name__)
-app.config['ALLOWED_EXTENSIONS'] = set(['jpg', 'png', 'jpeg'])
 CORS(app)
 
-# bikin koneksi firebase disini
 
-class MaturityData:
-    kelembaban: float
-    suhu: float
-    kematangan: str
+load_dotenv()
 
-def allowed_extension(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+def firebase_config_converter():
+    firebasejson = os.getenv('firebasejson')
 
-def check_server_availability(destination_url, timeout=30):
+    if not firebasejson:
+        print("Environment variable 'firebasejson' is not set or is empty.")
+        return None
+
     try:
-        response = requests.get(destination_url, timeout=timeout)
-        if response.status_code == 400:
-            return True
-        else:
-            return False
-    except requests.exceptions.Timeout:
-        return False
+        key = json.loads(firebasejson)
+    except json.JSONDecodeError as err:
+        print(f"Failed to decode JSON: {err}")
+        return None
 
+    return key
+keyjson=firebase_config_converter()
+cred = credentials.Certificate(keyjson)
+firebase_admin.initialize_app(cred, {'databaseURL': os.environ.get('firebaseUrl')})
+# Load model CNN
 def loadmodelCNN():
-    model = keras.models.load_model('Model/apple_maturity_cnn_model2.h5')
+    model = keras.models.load_model('Model/model_maturity (1).h5')
     return model
 
-def processImage(image_path, target_size=(128, 128)):
-    img = cv2.imread(image_path)
+# Proses gambar
+def processImage(image, target_size=(128, 128)):
+    # Konversi base64 ke gambar PIL
+    image = Image.open(io.BytesIO(image))
+    
+    # Simpan gambar ke file sementara
+    temp_dir = tempfile.mkdtemp()
+    temp_path = os.path.join(temp_dir, 'temp_image.png')
+    image.save(temp_path)
+    
+    # Resize dan konversi gambar ke HSV
+    img = np.array(image)
     img_resized = cv2.resize(img, target_size)
     img_hsv = cv2.cvtColor(img_resized, cv2.COLOR_BGR2HSV)
-    print("Shape after processing: ", img_hsv.shape)
     img_normalized = tf.cast(img_hsv, tf.float32) / 255.0
     img_batched = tf.expand_dims(img_normalized, axis=0)
-    return img_batched
+    
+    return img_batched, temp_path, temp_dir
 
+# Prediksi kelas
 def predict_class(images):
-    print("in predict")
     model = loadmodelCNN()
-    print("model loaded")
     predictions = model.predict(images)
     predicted_class = tf.argmax(predictions, axis=1).numpy()
-    print("success")
-
     return predicted_class
 
-def loadModelDT():
-    model = joblib.load('asset/model/decision_tree/decision_tree_model_v1.1.sav')
-    column_transformer = joblib.load('asset/model/decision_tree/column_transformer_v1.1.sav')
-    return model, column_transformer
+# Load model Regressor
+def loadModelDTRegressor():
+    model = joblib.load('Model/model_estimasi.pkl')
+    label_encoder = joblib.load('Model/label_encoder.pkl')
+    return model, label_encoder
 
-def preprocess_input(input_data, column_transformer):
-    # Convert input_data (dictionary) to DataFrame
+# Preprocessing input
+def preprocess_input(input_data, label_encoder):
     input_df = pd.DataFrame([input_data])
-    
-    # Transform the input data using the loaded ColumnTransformer
-    input_encoded = column_transformer.transform(input_df)
-    print("encoded data : ", input_encoded)
+    input_df['Tingkat Kematangan'] = label_encoder.transform(input_df['Tingkat Kematangan'])
+    input_encoded = input_df[['Suhu', 'Kelembaban', 'Tingkat Kematangan']]
     return input_encoded
 
+# Prediksi menggunakan model Regressor
 def make_predictions(input_encoded, model):
-    print("encoded input: ", input_encoded)
     predictions = model.predict(input_encoded)
     return predictions.tolist()
+
+# Konversi prediksi menjadi label kematangan
+def switch(prediction):
+    if prediction == 0:
+        return "Matang"
+    elif prediction == 1:
+        return "Setengah Matang"
+    elif prediction == 2:
+        return "Belum Matang"
+
+# Fungsi untuk mengambil data suhu dan kelembaban dari Firebase
+def get_sensor_data():
+    ref = db.reference('sensor')
+    sensor_data = ref.get()
+    suhu = sensor_data.get('temperature', None)
+    kelembaban = sensor_data.get('kelembaban', None)
+    return suhu, kelembaban
+
+# Route untuk halaman utama
+@app.route("/", methods=['GET'])
+def homepage():
+    try:
+        with open("static/index.html", "r") as file:
+            return file.read()
+    except IOError as e:
+        return "Error: File tidak ditemukan", 500
+
+def getImage():
+    ref = db.reference('image')
+    image = ref.get()
+    return image
+
+def string_to_base64(base64_string):
+    # Mengonversi string ke byte
+    if ',' in base64_string:
+        base64_string = base64_string.split(",")[1]
+    
+    # Decode base64 string
+    image_data = base64.b64decode(base64_string)
+    return image_data
 
 # Download NLTK resources
 nltk.download('punkt')
@@ -101,52 +145,33 @@ nltk.download('stopwords')
 
 # Knowledge base
 knowledge_base = {
-    "bercak daun": {
-        "pengertian": "Bercak daun adalah penyakit pada daun tanaman yang disebabkan oleh infeksi jamur atau bakteri, ditandai dengan munculnya bercak-bercak kecil berwarna cokelat atau hitam.",
-        "gejala": "Munculnya bercak-bercak kecil berwarna cokelat atau hitam pada daun.",
-        "penyebab": "Infeksi jamur atau bakteri.",
-        "cara mengatasi": "Menggunakan fungisida yang sesuai, menjaga kebersihan lingkungan sekitar pohon, dan memangkas bagian yang terinfeksi."
+    "leaf spot": {
+        "definition": "Leaf spot is a plant disease characterized by small brown or black spots on leaves, caused by fungal or bacterial infections. These spots can lead to premature leaf drop and reduced photosynthesis, weakening the plant.",
+        "symptoms": "The appearance of small brown or black spots on leaves. Over time, these spots may enlarge, merge, and cause significant leaf damage.",
+        "causes": "Fungal or bacterial infections. Common pathogens include fungi like Septoria and Cercospora, and bacteria like Xanthomonas.",
+        "control_methods": "Use appropriate fungicides, maintain cleanliness around the tree, and prune infected parts. Ensure proper air circulation and avoid overhead watering to reduce moisture on leaves, which can promote infection."
     },
-    "busuk buah": {
-        "pengertian": "Busuk buah adalah penyakit pada buah apel yang disebabkan oleh infeksi jamur seperti Botrytis atau Monilinia, menyebabkan buah menjadi membusuk dan berwarna cokelat atau hitam.",
-        "gejala": "Buah apel membusuk dan berwarna cokelat atau hitam.",
-        "penyebab": "Infeksi jamur seperti Botrytis atau Monilinia.",
-        "cara mengatasi": "Membuang buah yang terinfeksi, menggunakan fungisida, dan menjaga kebersihan kebun."
+    "fruit rot": {
+        "definition": "Fruit rot is a disease affecting apples, caused by fungal infections such as Botrytis or Monilinia, resulting in rotting and brown or black discoloration of the fruit. It can lead to significant crop losses both pre- and post-harvest.",
+        "symptoms": "Apples become rotten and turn brown or black. Affected fruits may develop a fuzzy or moldy appearance due to fungal growth.",
+        "causes": "Fungal infections like Botrytis or Monilinia. These fungi thrive in warm, humid conditions and can spread rapidly through contact or air.",
+        "control_methods": "Remove infected fruits, use fungicides, and maintain garden hygiene. Store fruits in a cool, dry place and handle them carefully to prevent wounds that can serve as entry points for pathogens."
     },
-    "kanker batang": {
-        "pengertian": "Kanker batang adalah penyakit pada batang pohon yang disebabkan oleh infeksi jamur Nectria galligena, ditandai dengan luka pada batang yang mengeluarkan getah dan menyebabkan batang membengkak dan mati.",
-        "gejala": "Luka pada batang pohon yang mengeluarkan getah, batang membengkak dan mati.",
-        "penyebab": "Infeksi jamur Nectria galligena.",
-        "cara mengatasi": "Memangkas bagian yang terinfeksi, menggunakan fungisida, dan menjaga kebersihan kebun."
+    "stem cancer": {
+        "definition": "Stem canker is a disease affecting tree trunks, caused by the fungal infection Nectria galligena, marked by lesions that exude sap and cause swelling and death of the trunk. It can significantly impair the structural integrity and vitality of the tree.",
+        "symptoms": "Lesions on the tree trunk that exude sap, swelling, and eventual death of the trunk. Over time, these cankers may enlarge, girdle the trunk, and cut off nutrient flow.",
+        "causes": "Fungal infection by Nectria galligena. This pathogen can enter through wounds or natural openings in the bark.",
+        "control_methods": "Prune infected parts, use fungicides, and maintain garden hygiene. Ensure proper pruning techniques to avoid creating large wounds and promote quick healing."
     },
-    "mati pucuk": {
-        "pengertian": "Mati pucuk adalah penyakit pada tanaman apel yang menyebabkan ujung-ujung cabang mengering dan mati, biasanya disebabkan oleh infeksi jamur atau bakteri.",
-        "gejala": "Ujung-ujung cabang mengering dan mati.",
-        "penyebab": "Infeksi jamur atau bakteri.",
-        "cara mengatasi": "Memangkas bagian yang terinfeksi, menggunakan fungisida atau bakterisida, dan menjaga kebersihan kebun."
+    "tip blight": {
+        "definition": "Tip blight is a disease in apple trees causing the tips of branches to dry out and die, usually due to fungal or bacterial infections. It can lead to reduced growth and productivity of the tree.",
+        "symptoms": "The tips of branches dry out and die. Affected areas may also exhibit discoloration, wilting, and dieback of the shoots.",
+        "causes": "Fungal or bacterial infections. Common pathogens include fungi like Diplodia and bacteria like Pseudomonas.",
+        "control_methods": "Prune infected parts, use fungicides or bactericides, and maintain garden hygiene. Avoid excessive nitrogen fertilization, which can make the tree more susceptible to infections."
     }
 }
 
-
-# Fungsi untuk melakukan web scraping dan mendapatkan teks
-def scrape_apple_diseases(url):
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    
-    paragraphs = soup.find_all('p')
-    text = "\n".join([para.get_text() for para in paragraphs])
-    return text
-
-# Fungsi untuk mengekstrak teks dari beberapa PDF
-def extract_text_from_pdfs(pdf_paths):
-    all_text = ""
-    for path in pdf_paths:
-        with pdfplumber.open(path) as pdf:
-            for page in pdf.pages:
-                all_text += page.extract_text() + "\n"
-    return all_text
-
-# Fungsi untuk membersihkan dan memproses teks
+# Function to preprocess text
 def preprocess_text(text):
     sentences = sent_tokenize(text)
     stop_words = set(stopwords.words('english'))
@@ -163,23 +188,23 @@ def preprocess_text(text):
     
     return cleaned_sentences
 
-# Temukan jawaban yang relevan menggunakan TF-IDF dan cosine similarity
+# Find relevant answer using TF-IDF and cosine similarity
 def find_answer_tfidf(sentences, query):
     tfidf_vectorizer = TfidfVectorizer().fit_transform(sentences + [query])
     cosine_similarities = cosine_similarity(tfidf_vectorizer[-1], tfidf_vectorizer[:-1]).flatten()
     most_similar_sentence_index = np.argmax(cosine_similarities)
     return sentences[most_similar_sentence_index]
 
-# Temukan nama penyakit berdasarkan gejala
+# Find disease name based on symptoms
 def find_disease_from_symptom(query):
     for disease, info in knowledge_base.items():
-        if any(symptom in query.lower() for symptom in info['gejala'].lower().split(", ")):
+        if any(symptom in query.lower() for symptom in info['symptoms'].lower().split(", ")):
             return disease
     return None
 
-# Temukan jawaban yang relevan dari knowledge base
+# Find relevant answer from knowledge base
 def find_answer_from_knowledge_base(query):
-    if "apa saja" in query.lower():
+    if "what are" in query.lower():
         return ", ".join(knowledge_base.keys())
     query_words = set(query.lower().split())
     
@@ -187,138 +212,93 @@ def find_answer_from_knowledge_base(query):
         key_words = set(key.split())
         if query_words & key_words:
             if key in query.lower():
-                if "gejala" in query.lower():
-                 return value["gejala"]
-            elif "penyebab" in query.lower():
-                return value["penyebab"]
-            elif "menyebabkan" in query.lower():
-                return value["penyebab"]
-            elif "cara mengatasi" in query.lower():
-                return value["cara mengatasi"]
-            elif "mengobati" in query.lower():
-                return value["cara mengatasi"]
-            elif "mengatasi" in query.lower():
-                return value["cara mengatasi"]
-            elif "apa itu" in query.lower():
-                return value["pengertian"]
-            elif "pengertian" in query.lower():
-                return value["pengertian"]
-            elif "mengalami" in query.lower():
-                return value["pengertian"]
+                if "symptoms" in query.lower():
+                 return value["symptoms"]
+            elif "causes" in query.lower():
+                return value["causes"]
+            elif "cause" in query.lower():
+                return value["causes"]
+            elif "control methods" in query.lower():
+                return value["control_methods"]
+            elif "control" in query.lower():
+                return value["control_methods"]
+            elif "treat" in query.lower():
+                return value["control_methods"]
+            elif "overcome" in query.lower():
+                return value["control_methods"]
+            elif "what is" in query.lower():
+                return value["definition"]
+            elif "definition" in query.lower():
+                return value["definition"]
+            elif "have" in query.lower():
+                return value["definition"]
             else:
-                return f"Pengertian: {value['pengertian']}, Gejala: {value['gejala']}, Penyebab: {value['penyebab']}, Cara mengatasi: {value['cara mengatasi']}"
+                return f"definition: {value['definition']}, symptoms: {value['symptoms']}, causes: {value['causes']}, control_methods: {value['control_methods']}"
             
-# Pencocokan kata kunci parsial
+# Partial keyword matching
     for key, value in knowledge_base.items():
         if any(word in query.lower() for word in key.split()):
-            return f"Pengertian: {value['pengertian']}, Gejala: {value['gejala']}, Penyebab: {value['penyebab']}, Cara mengatasi: {value['cara mengatasi']}"
+            return f"definition: {value['definition']}, symptoms: {value['symptoms']}, causes: {value['causes']}, control_methods: {value['control_methods']}"
     return None
 
-# Inisialisasi Flask
+# Initialize Flask
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key'
 app.config['SESSION_TYPE'] = 'filesystem'
 Session(app)
 
-# URL dari website yang memiliki informasi tentang penyakit pada daun apel
-scrap_result = []
-url = ["https://www.kompas.com/homey/read/2022/09/04/095956376/ketahui-ini-4-penyakit-yang-menyerang-tanaman-apel", "https://www.idntimes.com/science/discovery/timmy-si-penulis/penyakit-yang-menyerang-tanaman-apel-1"]
-for content in url :
-    scraped_text = scrape_apple_diseases(content)
-    scrap_result.append(scraped_text)
-
-# Paths dari PDF lokal
-pdf_paths = ["D:/API/Knowledge/Penyakit_Apel_Data_ChatBot.pdf"]  # Ganti dengan jalur PDF yang benar
-pdf_text = extract_text_from_pdfs(pdf_paths)
-
-# Gabungkan teks dari knowledge base, website, dan PDF
+# Preprocess the knowledge base text
 knowledge_text = "\n".join([f"{k}: {v}" for k, v in knowledge_base.items()])
-combined_text = knowledge_text + "\n" + scraped_text + "\n" + pdf_text
-sentences = preprocess_text(combined_text)
-class MaturityData:
-    def __init__(self, kelembapan, suhu, kematangan):
-        self.kelembapan = kelembapan
-        self.suhu = suhu
-        self.kematangan = kematangan
-@app.before_request
-def remove_trailing_slash():
-    if request.path != '/' and request.path.endswith('/'):
-        return redirect(request.path[:-1])
+sentences = preprocess_text(knowledge_text)
 
-@app.route("/", methods=['GET'])
-def homepage():
-    try:
-        # Membuka file HTML
-        with open("static/index.html", "r") as file:
-            return file.read()
-    except IOError as e:
-        print("Error:", e)
-        return "Error: File not found", 500
+@app.route("/api/predict", methods=['POST'])
+def ripness_prediction():
+        imageString = getImage()
+        image64 = string_to_base64(imageString)
+        img_batched, temp_path, temp_dir = processImage(image64)
+        predicted_class = predict_class(img_batched)
+        prediction = int(predicted_class[0])
+        kematangan = switch(prediction)
+        
 
-def plant_recommendation(maturity, predictiion):
-    try:
-        # maturity = MaturityData(**input_data)
-        # ambil value input dari iot
+        # Ambil data suhu dan kelembaban dari Firebase
+        suhu, kelembaban = get_sensor_data()
+        if suhu is None or kelembaban is None:
+            return jsonify({
+                "error": "Data suhu atau kelembaban tidak ditemukan di Firebase"
+            }), 400
+        print(suhu, kelembaban)
         data = {
-            "kelembaban": maturity.kelembapan,
-            "suhu": maturity.suhu,
-            "kematangan": prediction
+            "Kelembaban": float(kelembaban),
+            "Suhu": float(suhu),
+            "Tingkat Kematangan": kematangan
         }
-        model, column_transformer = loadModelDT()
-        encoded_data = preprocess_input(data, column_transformer)
-        prediction = make_predictions(encoded_data, model)
+
+        #Load model Regressor dan encoder
+        model, label_encoder = loadModelDTRegressor()
+        encoded_data = preprocess_input(data, label_encoder)
+        estimasi = make_predictions(encoded_data, model)
+
+        #Hapus file sementara setelah diproses
+        os.remove(temp_path)
+        os.rmdir(temp_dir)
 
         return jsonify({
-            "data":{
-                "maturityEstimation": prediction[0]
-                },
-            "status":{
-                    "code":200,
-                    "message":"successfully estimationing maturity"
-                }}
-            ), 200
-    
-    except Exception as err:
-        app.logger.error(f"handler: bind input error: {err}")
-        return jsonify({"error": f"cannot embed data: {err}"}), 400
+            "data": {
+                "Kematangan": kematangan,
+                "Estimasi": estimasi[0]
+            }, 
+            "status": {
+                "code": 200,
+                "message": "Berhasil memprediksi kematangan apel"
+            }
+        }), 200
 
-@app.route("/api/predict", methods = ['POST'])
-def soil_prediction():
-        image = request.files["image"]
-        if image:
-            # Membuat file sementara untuk menyimpan file gambar
-            temp_dir = tempfile.mkdtemp()
-            temp_path = os.path.join(temp_dir, 'temp_image.jpg')
-            image.save(temp_path)
-
-            processed_image = processImage(temp_path)
-            print("processed image shape :", processed_image.shape)
-            predicted_class = predict_class(processed_image)
-            print("predicted : ", predicted_class[0])
-
-            prediction = str(predicted_class[0])
-
-            os.remove(temp_path)
-            os.rmdir(temp_dir)
-            return jsonify({
-                "data": {
-                    "kematangan": prediction
-                }, 
-                "status": {
-                    "code": 200,
-                    "message": "successfully Predict Maturity of Apple"
-                },
-            }), 200
-        else:
-            return jsonify({
-                "error": "image file needed"
-                }), 400
-        
 @app.route('/chatbot', methods=['GET', 'POST'])
 def chatbot():
     if request.method == 'GET':
         session.clear()
-        return jsonify({'greeting': 'Halo, adakah yang bisa saya bantu seputar penyakit pada apel?'})
+        return jsonify({'greeting': 'Hi, how can I help you about apple disease?'})
     
     elif request.method == 'POST':
         user_input = request.json.get('query')
@@ -331,51 +311,50 @@ def chatbot():
         session['history'].append(user_input)
         context_query = " ".join(session['history'])
 
-        # Logika untuk mendeteksi sapaan
-        greetings = ["hi", "hello", "hai", "halo", "hey"]
+        # Logic to detect greetings
+        greetings = ["hi", "hello", "hey"]
         assistance_requests = [
-            "bisa kah kamu membantu saya",
-            "dapatkah kamu membantu saya",
-            "bisa kamu membantu saya",
-            "bantu saya",
-            "butuh bantuan",
-            "tolong bantu saya",
-            "dapat kamu membantu saya",
-            "coba berikan contoh",
-            "tolong dong bantu saya",
-            "saya mau nanya nih",
-            "saya mau nanya",
-            "mau nanya sesuatu",
-            "bisa bantu saya",
-            "mau nanya dong",
-            "mau nanya",
-            "jadi gini",
-            "saya ingin bertanya",
-            "ingin bertanya",
-            "ingin bertanya sesuatu",
-            "saya ingin bertanya",
-            "pengen nanya"
+            "Can you help me?",
+            "Could you help me out?",
+            "Can you assist me?",
+            "Help me, please",
+            "I need help",
+            "Please, give me a hand",
+            "Could you lend me a hand?",
+            "Could you give an example?",
+            "Please, I need your help",
+            "I have a question",
+            "I want to ask something",
+            "I need to ask something",
+            "Can you give me a hand?",
+            "I have a quick question",
+            "I need to ask",
+            "So, here's the thing",
+            "I would like to ask",
+            "I want to ask",
+            "I need to ask something",
+            "I have a question",
+            "I have something to ask"
         ]
 
         if any(greet in user_input.lower() for greet in greetings):
-            return jsonify({'answer': 'Halo! Bagaimana saya bisa membantu Anda hari ini?'})
+            return jsonify({'answer': 'Hi, how can I help you today?'})
         
         if any(phrase in user_input.lower() for phrase in assistance_requests):
-            return jsonify({'answer': 'Tentu, saya di sini untuk membantu Anda. Apa yang bisa saya bantu?'})
+            return jsonify({'answer': 'Sure, what can I help you with today about apple disease?'})
         
-        # Cek knowledge base untuk jawaban yang relevan
+        # Check the knowledge base for a relevant answer
         answer_from_kb = find_answer_from_knowledge_base(user_input)
         if answer_from_kb:
-            return jsonify({'answer': "Ini jawabannya: " + answer_from_kb})
+            return jsonify({'answer': "This is the answer: " + answer_from_kb})
         
-        # Jika tidak ditemukan di knowledge base, coba cari nama penyakit berdasarkan gejala
+        # If not found in the knowledge base, try to find the disease name based on symptoms
         disease_from_symptom = find_disease_from_symptom(user_input)
         if disease_from_symptom:
-            return jsonify({'answer': f'Berdasarkan gejala yang Anda sebutkan, kemungkinan penyakitnya adalah {disease_from_symptom}.'})
+            return jsonify({'answer': f'Based on your question, this is the probable answer: {disease_from_symptom}.'})
         
-        # Jika tidak ditemukan di knowledge base atau berdasarkan gejala, gunakan TF-IDF dan cosine similarity
-        answer_from_tfidf = find_answer_tfidf(sentences, user_input)
-        return jsonify({'answer': "Pertanyaan Tersebut Diluar Tema dari ChatBot"})
-
+        # answer_from_tfidf = find_answer_tfidf(sentences, user_input)
+        return jsonify({'answer': "That question is out of the chatbot's knowledge"})
+    
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8081)))
