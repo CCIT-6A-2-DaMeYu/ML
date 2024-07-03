@@ -1,26 +1,22 @@
-# Menggunakan image Python 3.11.0-slim
+# Use the official lightweight Python image.
+# https://hub.docker.com/_/python
 FROM python:3.11-slim
 
-# Install dependensi yang dibutuhkan oleh OpenCV
-RUN apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Menyalin file requirements.txt ke dalam image
-COPY requirements.txt /app/requirements.txt
-
-# Mengatur working directory ke /app di dalam image
+# Set the working directory in the container
 WORKDIR /app
 
-# Membuat lingkungan virtual
-RUN python3 -m venv venv
+# Copy the requirements file into the container
+COPY requirements.txt .
 
-# Aktivasi lingkungan virtual
-RUN /bin/bash -c "source venv/bin/activate"
-
-# Menginstal pustaka-pustaka yang diperlukan
+# Install the dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Menyalin seluruh konten aplikasi ke dalam image
-COPY . /app
+# Copy the rest of the application code into the container
+COPY . .
 
-# Menjalankan aplikasi Python
+# Run the application
 CMD ["python", "app.py"]
