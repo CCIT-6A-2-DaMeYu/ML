@@ -52,7 +52,7 @@ cred = credentials.Certificate(keyjson)
 firebase_admin.initialize_app(cred, {'databaseURL': os.environ.get('firebaseUrl')})
 # Load model CNN
 def loadmodelCNN():
-    model = keras.models.load_model('Model/model_maturity (1).h5')
+    model = keras.models.load_model('Model/model_Ripeness(2).h5')
     return model
 
 # Proses gambar
@@ -68,8 +68,8 @@ def processImage(image, target_size=(128, 128)):
     # Resize dan konversi gambar ke HSV
     img = np.array(image)
     img_resized = cv2.resize(img, target_size)
-    img_hsv = cv2.cvtColor(img_resized, cv2.COLOR_BGR2HSV)
-    img_normalized = tf.cast(img_hsv, tf.float32) / 255.0
+    # img_hsv = cv2.cvtColor(img_resized, cv2.COLOR_BGR2HSV)
+    img_normalized = tf.cast(img_resized, tf.float32) / 255.0
     img_batched = tf.expand_dims(img_normalized, axis=0)
     
     return img_batched, temp_path, temp_dir
@@ -83,15 +83,15 @@ def predict_class(images):
 
 # Load model Regressor
 def loadModelDTRegressor():
-    model = joblib.load('Model/model_estimasi.pkl')
-    label_encoder = joblib.load('Model/label_encoder.pkl')
+    model = joblib.load('Model/decision_tree_Regressor_model.pkl')
+    label_encoder = joblib.load('Model/label_encoder (1).pkl')
     return model, label_encoder
 
 # Preprocessing input
 def preprocess_input(input_data, label_encoder):
     input_df = pd.DataFrame([input_data])
-    input_df['Tingkat Kematangan'] = label_encoder.transform(input_df['Tingkat Kematangan'])
-    input_encoded = input_df[['Suhu', 'Kelembaban', 'Tingkat Kematangan']]
+    input_df['Ripeness'] = label_encoder.transform(input_df['Ripeness'])
+    input_encoded = input_df[['Temperature', 'Humidity', 'Ripeness']]
     return input_encoded
 
 # Prediksi menggunakan model Regressor
@@ -102,11 +102,11 @@ def make_predictions(input_encoded, model):
 # Konversi prediksi menjadi label kematangan
 def switch(prediction):
     if prediction == 0:
-        return "Matang"
+        return "Ripe"
     elif prediction == 1:
-        return "Setengah Matang"
+        return "Half Ripe"
     elif prediction == 2:
-        return "Belum Matang"
+        return "Immature"
 
 # Fungsi untuk mengambil data suhu dan kelembaban dari Firebase
 def get_sensor_data():
@@ -269,9 +269,9 @@ def ripness_prediction():
             }), 400
         print(suhu, kelembaban)
         data = {
-            "Kelembaban": float(kelembaban),
-            "Suhu": float(suhu),
-            "Tingkat Kematangan": kematangan
+            "Humidity": float(kelembaban),
+            "Temperature": float(suhu),
+            "Ripeness": kematangan
         }
 
         #Load model Regressor dan encoder
@@ -285,8 +285,8 @@ def ripness_prediction():
 
         return jsonify({
             "data": {
-                "Kematangan": kematangan,
-                "Estimasi": estimasi[0]
+                "Ripeness": kematangan,
+                "Estimation": estimasi[0]
             }, 
             "status": {
                 "code": 200,
@@ -357,4 +357,4 @@ def chatbot():
         return jsonify({'answer': "That question is out of the chatbot's knowledge"})
     
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8081)))
