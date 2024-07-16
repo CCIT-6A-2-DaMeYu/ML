@@ -20,9 +20,8 @@ from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from flask import Flask, request, jsonify, session
-from flask_session import Session
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+# from sklearn.feature_extraction.text import TfidfVectorizer
+# from sklearn.metrics.pairwise import cosine_similarity
 from dotenv import load_dotenv
 
 
@@ -52,7 +51,7 @@ cred = credentials.Certificate(keyjson)
 firebase_admin.initialize_app(cred, {'databaseURL': os.environ.get('firebaseUrl')})
 # Load model CNN
 def loadmodelCNN():
-    model = keras.models.load_model('Model/model_Ripeness(2).h5')
+    model = keras.models.load_model('Model/model_Ripeness(4) (1).h5')
     return model
 
 # Proses gambar
@@ -189,11 +188,11 @@ def preprocess_text(text):
     return cleaned_sentences
 
 # Find relevant answer using TF-IDF and cosine similarity
-def find_answer_tfidf(sentences, query):
-    tfidf_vectorizer = TfidfVectorizer().fit_transform(sentences + [query])
-    cosine_similarities = cosine_similarity(tfidf_vectorizer[-1], tfidf_vectorizer[:-1]).flatten()
-    most_similar_sentence_index = np.argmax(cosine_similarities)
-    return sentences[most_similar_sentence_index]
+# def find_answer_tfidf(sentences, query):
+#     tfidf_vectorizer = TfidfVectorizer().fit_transform(sentences + [query])
+#     cosine_similarities = cosine_similarity(tfidf_vectorizer[-1], tfidf_vectorizer[:-1]).flatten()
+#     most_similar_sentence_index = np.argmax(cosine_similarities)
+#     return sentences[most_similar_sentence_index]
 
 # Find disease name based on symptoms
 def find_disease_from_symptom(query):
@@ -242,10 +241,10 @@ def find_answer_from_knowledge_base(query):
     return None
 
 # Initialize Flask
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_secret_key'
-app.config['SESSION_TYPE'] = 'filesystem'
-Session(app)
+# app = Flask(__name__)
+# app.config['SECRET_KEY'] = 'your_secret_key'
+# app.config['SESSION_TYPE'] = 'filesystem'
+# Session(app)
 
 # Preprocess the knowledge base text
 knowledge_text = "\n".join([f"{k}: {v}" for k, v in knowledge_base.items()])
@@ -305,11 +304,6 @@ def chatbot():
         if not user_input:
             return jsonify({'error': 'No query provided'}), 400
         
-        if 'history' not in session:
-            session['history'] = []
-
-        session['history'].append(user_input)
-        context_query = " ".join(session['history'])
 
         # Logic to detect greetings
         greetings = ["hi", "hello", "hey"]
