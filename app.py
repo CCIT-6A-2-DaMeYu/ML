@@ -312,36 +312,10 @@ def chatbot():
         context_query = " ".join(session['history'])
 
         # Logic to detect greetings
-        greetings = ["hi", "hello", "hey"]
-        assistance_requests = [
-            "Can you help me?",
-            "Could you help me out?",
-            "Can you assist me?",
-            "Help me, please",
-            "I need help",
-            "Please, give me a hand",
-            "Could you lend me a hand?",
-            "Could you give an example?",
-            "Please, I need your help",
-            "I have a question",
-            "I want to ask something",
-            "I need to ask something",
-            "Can you give me a hand?",
-            "I have a quick question",
-            "I need to ask",
-            "So, here's the thing",
-            "I would like to ask",
-            "I want to ask",
-            "I need to ask something",
-            "I have a question",
-            "I have something to ask"
-        ]
+        greetings = ["hi", "hello", "hey", "hallo", "hand", "help", "assist", "What's up", "Yo", "oi", "hai","hei"]
 
         if any(greet in user_input.lower() for greet in greetings):
             return jsonify({'answer': 'Hi, how can I help you today?'})
-        
-        if any(phrase in user_input.lower() for phrase in assistance_requests):
-            return jsonify({'answer': 'Sure, what can I help you with today about apple disease?'})
         
         # Check the knowledge base for a relevant answer
         answer_from_kb = find_answer_from_knowledge_base(user_input)
